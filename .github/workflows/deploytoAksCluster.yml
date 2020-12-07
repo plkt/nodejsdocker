@@ -1,0 +1,50 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    
+    - uses: azure/docker-login@v1
+      with:
+        login-server: 83b69b7c9fe140929c704942f935c92f.azurecr.io
+        username: ${{ secrets.acr_83b69b7c9fe140929c704942f935c92f_username }}
+        password: ${{ secrets.acr_83b69b7c9fe140929c704942f935c92f_password }}
+    
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/Application" -f  "Application/Dockerfile" -t 83b69b7c9fe140929c704942f935c92f.azurecr.io/actionsdemoaks:${{ github.sha }}
+        docker push 83b69b7c9fe140929c704942f935c92f.azurecr.io/actionsdemoaks:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      with:
+         kubeconfig: ${{ secrets.aks_actionsdemoaks_kubeConfig }}
+      id: login
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep actionsdemo-aksa498 | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace actionsdemo-aksa498`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: actionsdemo-aksa498
+        container-registry-url: 83b69b7c9fe140929c704942f935c92f.azurecr.io
+        container-registry-username: ${{ secrets.acr_83b69b7c9fe140929c704942f935c92f_username }}
+        container-registry-password: ${{ secrets.acr_83b69b7c9fe140929c704942f935c92f_password }}
+        secret-name: actionsdemoadockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: actionsdemo-aksa498
+        manifests: |
+          manifests/deployment.yml
+          manifests/service.yml
+        images: |
+          83b69b7c9fe140929c704942f935c92f.azurecr.io/actionsdemoaks:${{ github.sha }}
+        imagepullsecrets: |
+          actionsdemoadockerauth
